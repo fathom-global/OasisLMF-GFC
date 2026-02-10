@@ -98,10 +98,10 @@ def oasis_log(*args, **kwargs):
             caller_module_name = func.__globals__.get('__name__')
 
             if func_name == '__init__':
-                logger.debug("RUNNING: {}.{}".format(
+                logger.debug("RUNNING (FATHOM-OASISLMF): {}.{}".format(
                     caller_module_name, func_name))
             else:
-                logger.info("RUNNING: {}.{}".format(
+                logger.info("RUNNING (FATHOM-OASISLMF): {}.{}".format(
                     caller_module_name, func_name))
 
             args_name = getargspec(func)[0]
