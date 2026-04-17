@@ -95,7 +95,7 @@ def prepare_ded_and_limit(level_df):
     return level_df
 
 
-def get_level_df_lookup(left_df, right_df, lookup_candidates, level_info):
+def get_level_df_lookup(left_df, right_df, lookup_candidates, level_info, acc_number_lookup=None):
     lookup_cols = [col for col in lookup_candidates if col in right_df.columns]
     join_cols = [col for col in lookup_cols if col in left_df.columns]
 
@@ -107,7 +107,29 @@ def get_level_df_lookup(left_df, right_df, lookup_candidates, level_info):
     lookup_df = right_df[lookup_cols].drop_duplicates()
     duplicate_filter = lookup_df.duplicated(subset=join_cols, keep=False)
     if duplicate_filter.any():
-        conflict_rows = lookup_df.loc[duplicate_filter, lookup_cols]
+        diagnostic_cols = [
+            col for col in [
+                'PortNumber', 'AccNumber', 'PolNumber', 'CondTag', 'CondNumber',
+                'acc_id', 'loc_id', 'peril_id', 'coverage_type_id', 'steptriggertype'
+            ]
+            if col in right_df.columns and col not in lookup_cols
+        ]
+        conflict_cols = lookup_cols + diagnostic_cols
+        conflict_rows = right_df.loc[
+            right_df[join_cols].duplicated(keep=False),
+            conflict_cols
+        ].drop_duplicates()
+
+        if acc_number_lookup is not None and 'acc_id' in conflict_rows.columns and 'AccNumber' not in conflict_rows.columns:
+            conflict_rows = conflict_rows.merge(acc_number_lookup, how='left', on='acc_id')
+            if 'PortNumber' in conflict_rows.columns:
+                ordered_cols = lookup_cols + [
+                    col for col in ['acc_id', 'PortNumber', 'AccNumber'] if col in conflict_rows.columns and col not in lookup_cols
+                ] + [
+                    col for col in diagnostic_cols if col not in {'PortNumber', 'AccNumber'}
+                ]
+                conflict_rows = conflict_rows[ordered_cols]
+
         sample_conflicts = conflict_rows.sort_values(by=join_cols, kind='stable').head(20)
         raise OasisException(
             "Ambiguous FM term mapping for level {}. "
@@ -526,6 +548,7 @@ def get_il_input_items(
             accounts_df = exposure_data.account.dataframe
             if 'acc_id' not in accounts_df:
                 accounts_df['acc_id'] = get_ids(exposure_data.account.dataframe, ['PortNumber', 'AccNumber'])
+            acc_number_lookup = accounts_df[['acc_id', 'PortNumber', 'AccNumber']].drop_duplicates()
             acc_id_map = accounts_df[['PortNumber', 'AccNumber', 'acc_id']].drop_duplicates()
             gul_inputs_df = gul_inputs_df.merge(acc_id_map, how='left')
             locations_df = locations_df.merge(acc_id_map, how='left')
@@ -549,6 +572,7 @@ def get_il_input_items(
             gul_inputs_df['acc_id'] = gul_inputs_df['loc_id']
             accounts_df = exposure_data.account.dataframe
             accounts_df['acc_id'] = accounts_df['loc_id']
+            acc_number_lookup = accounts_df[['acc_id', 'PortNumber', 'AccNumber']].drop_duplicates()
             accounts_df = accounts_df.drop(columns=['PortNumber', 'AccNumber'])
 
         oed_schema = exposure_data.oed_schema
@@ -780,6 +804,7 @@ def get_il_input_items(
                     level_df,
                     agg_id_merge_col + agg_id_merge_col_extra,
                     level_info,
+                    acc_number_lookup=acc_number_lookup,
                 )
                 gul_inputs_df = gul_inputs_df.merge(
                     level_lookup_df,
