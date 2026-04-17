@@ -273,9 +273,33 @@ def get_cond_info(locations_df, accounts_df):
         else:
             accounts_df['CondPeril'] = ''
         for acc_rec in accounts_df.to_dict(orient="records"):
+            cond_priority = acc_rec['CondPriority'] or 1
             cond_tag_key = (acc_rec['acc_id'], acc_rec['CondTag'])
             cond_number_key = (acc_rec['acc_id'], acc_rec['CondTag'], acc_rec['CondNumber'])
-            cond_tag = cond_tags.setdefault(cond_tag_key, {'CondPriority': acc_rec['CondPriority'] or 1, 'CondPeril': acc_rec['CondPeril']})
+            cond_tag = cond_tags.setdefault(
+                cond_tag_key,
+                {
+                    'CondPriority': cond_priority,
+                    'CondPeril': acc_rec['CondPeril'],
+                    'first_layer_id': acc_rec['layer_id'],
+                    'first_pol_number': acc_rec['PolNumber'],
+                }
+            )
+            if acc_rec['CondTag'] != default_cond_tag and cond_tag['CondPriority'] != cond_priority:
+                raise OasisException(
+                    "Inconsistent CondPriority values for acc_id={}, CondTag={!r}. "
+                    "First seen: CondPriority={} on PolNumber={}, layer_id={}. "
+                    "Current row: CondPriority={} on PolNumber={}, layer_id={}.".format(
+                        acc_rec['acc_id'],
+                        acc_rec['CondTag'],
+                        cond_tag['CondPriority'],
+                        cond_tag['first_pol_number'],
+                        cond_tag['first_layer_id'],
+                        cond_priority,
+                        acc_rec['PolNumber'],
+                        acc_rec['layer_id'],
+                    )
+                )
             cond_tag.setdefault('layers', {})[acc_rec['layer_id']] = {'CondNumber': cond_number_key}
             exclusion_cond_tags = account_layer_exclusion.setdefault(acc_rec['acc_id'], {}).setdefault(acc_rec['layer_id'],
                                                                                                        set())
