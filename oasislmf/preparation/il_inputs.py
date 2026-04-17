@@ -95,6 +95,32 @@ def prepare_ded_and_limit(level_df):
     return level_df
 
 
+def get_level_df_lookup(left_df, right_df, lookup_candidates, level_info):
+    lookup_cols = [col for col in lookup_candidates if col in right_df.columns]
+    join_cols = [col for col in lookup_cols if col in left_df.columns]
+
+    if not join_cols:
+        raise OasisException(
+            f"Missing merge key columns for FM level lookup: {level_info}"
+        )
+
+    lookup_df = right_df[lookup_cols].drop_duplicates()
+    duplicate_filter = lookup_df.duplicated(subset=join_cols, keep=False)
+    if duplicate_filter.any():
+        conflict_rows = lookup_df.loc[duplicate_filter, lookup_cols]
+        sample_conflicts = conflict_rows.sort_values(by=join_cols, kind='stable').head(20)
+        raise OasisException(
+            "Ambiguous FM term mapping for level {}. "
+            "Lookup keys {} are not unique. Sample conflicting rows:\n{}".format(
+                level_info,
+                join_cols,
+                sample_conflicts.to_string(index=False)
+            )
+        )
+
+    return lookup_df, join_cols
+
+
 def get_calc_rule_ids(il_inputs_calc_rules_df, calc_rule_type):
     """
     merge selected il_inputs with the correct calc_rule table and  return a pandas Series of calc. rule IDs
@@ -748,9 +774,18 @@ def get_il_input_items(
                     continue
                 level_df = prepare_ded_and_limit(level_df)
 
-                agg_id_merge_col = list(set(agg_id_merge_col).intersection(level_df.columns))
+                agg_id_merge_col = [col for col in agg_id_merge_col if col in level_df.columns]
+                level_lookup_df, level_lookup_join_cols = get_level_df_lookup(
+                    gul_inputs_df,
+                    level_df,
+                    agg_id_merge_col + agg_id_merge_col_extra,
+                    level_info,
+                )
                 gul_inputs_df = gul_inputs_df.merge(
-                    level_df[agg_id_merge_col + agg_id_merge_col_extra].drop_duplicates(), how='left', validate='many_to_one')
+                    level_lookup_df,
+                    how='left',
+                    on=level_lookup_join_cols,
+                    validate='many_to_one')
                 if is_policy_layer_level:  # we merge all on account at this level even if there is no policy
                     gul_inputs_df["FMTermGroupID"] = gul_inputs_df["FMTermGroupID"].fillna(-1).astype('i4')
                 else:
